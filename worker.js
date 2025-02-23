@@ -3,6 +3,11 @@ const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const play = require('play-dl');
 require('dotenv').config();
 
+console.log(
+  'Creds',
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 // Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
