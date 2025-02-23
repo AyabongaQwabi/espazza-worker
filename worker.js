@@ -1,39 +1,111 @@
 const { createClient } = require('@supabase/supabase-js');
 const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const play = require('play-dl');
+const puppeteer = require('puppeteer');
 require('dotenv').config();
 
-console.log(
-  'Creds',
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-// Initialize Supabase client
+// Configure play-dl with authentication
+play.setToken({
+  useragent: [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  ],
+});
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
+  let lastError;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      // Add a random delay between attempts
+      if (i > 0) {
+        const delay = Math.floor(Math.random() * 2000) + 1000; // Random delay between 1-3 seconds
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      const videoInfo = await play.video_info(youtubeLink);
+      return videoInfo;
+    } catch (error) {
+      console.error(`Attempt ${i + 1} failed:`, error);
+      lastError = error;
+
+      // If this is a bot detection error, try with Puppeteer as fallback
+      if (error.message.includes('bot') && i === maxRetries - 1) {
+        try {
+          return await getVideoInfoWithPuppeteer(youtubeLink);
+        } catch (puppeteerError) {
+          console.error('Puppeteer fallback failed:', puppeteerError);
+          throw puppeteerError;
+        }
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function getVideoInfoWithPuppeteer(youtubeLink) {
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
+    const page = await browser.newPage();
+
+    // Set a realistic user agent
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    );
+
+    // Navigate to the YouTube video
+    await page.goto(youtubeLink, { waitUntil: 'networkidle0' });
+
+    // Extract video information
+    const videoInfo = await page.evaluate(() => {
+      const title = document.querySelector(
+        'h1.ytd-video-primary-info-renderer'
+      )?.textContent;
+      const description = document.querySelector(
+        '#description-inline-expander'
+      )?.textContent;
+
+      return {
+        video_details: {
+          title: title || '',
+          description: description || '',
+        },
+      };
+    });
+
+    return videoInfo;
+  } finally {
+    await browser.close();
+  }
+}
+
 async function processJob(job) {
   try {
     console.log(`Processing job ${job.id}...`);
 
-    // Update job status to processing
     await supabase
       .from('video_promotion_queue')
       .update({ status: 'processing' })
       .eq('id', job.id);
 
-    // Get video info
-
     console.log('Getting video info...');
-    const videoInfo = await play.video_info(job.youtube_link);
+    const videoInfo = await getVideoInfoWithRetry(job.youtube_link);
     console.log('Video info:', videoInfo);
+
     if (!videoInfo) {
       throw new Error('Could not get video information');
     }
 
-    // Get video stream
+    // Get video stream with retry logic
     console.log('Getting video stream...');
     const stream = await play.stream_from_info(videoInfo);
 
@@ -41,7 +113,7 @@ async function processJob(job) {
       throw new Error('Could not get video stream');
     }
 
-    // Initialize Facebook API
+    // Rest of your existing code...
     const accessToken = process.env.FACEBOOK_ACCESS_TOKEN;
     const pageId = process.env.FACEBOOK_PAGE_ID;
 
@@ -52,14 +124,13 @@ async function processJob(job) {
     const api = FacebookAdsApi.init(accessToken);
     const page = new Page(pageId);
 
-    // Prepare post content
     console.log('\n\nPreparing post content...');
     const postDescription = `${job.promotional_text}\n\n${
       videoInfo.video_details.description || ''
     }\n\n[ eSpazza YT Promotion by @${job.username} ]`;
 
     console.log('Post description:', postDescription);
-    // Post to Facebook
+
     console.log('\n\nPosting to Facebook...');
     const response = await page.createVideo({
       description: postDescription,
@@ -69,7 +140,6 @@ async function processJob(job) {
 
     console.log('Facebook API response:', response);
 
-    // Update job status to completed
     await supabase
       .from('video_promotion_queue')
       .update({
@@ -93,10 +163,8 @@ async function processJob(job) {
 async function worker() {
   console.log('Worker started...');
 
-  // Define the interval time (in milliseconds)
   const intervalTime = 10000; // 10 seconds
 
-  // Function to process jobs
   async function processPendingJobs() {
     try {
       console.log('Fetching pending jobs...');
@@ -123,12 +191,9 @@ async function worker() {
     }
   }
 
-  // Start processing jobs every 10 seconds
   setInterval(async () => {
     await processPendingJobs();
   }, intervalTime);
 }
 
-// Start the worker
 worker().catch(console.error);
-// Start the worker
