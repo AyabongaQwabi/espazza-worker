@@ -1,11 +1,12 @@
 const { createClient } = require('@supabase/supabase-js');
 const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const play = require('play-dl');
+require('dotenv').config();
 
 // Initialize Supabase client
 const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
 );
 
 async function processJob(job) {
