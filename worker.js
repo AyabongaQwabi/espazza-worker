@@ -1,13 +1,13 @@
 const { createClient } = require('@supabase/supabase-js');
 const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const { google } = require('googleapis');
-const YTDlpWrap = require('yt-dlp-wrap').default;
+const ytdl = require('ytdl-core');
+const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
 const youtube = google.youtube('v3');
-const ytDlp = new YTDlpWrap();
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -44,28 +44,48 @@ async function downloadVideo(youtubeLink) {
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
 
   try {
-    console.log('Starting download to:', videoPath);
+    console.log('Getting video info...');
+    const info = await ytdl.getInfo(youtubeLink, {
+      requestOptions: {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
+      },
+    });
 
-    // Remove existing file if it exists
-    if (fs.existsSync(videoPath)) {
-      fs.unlinkSync(videoPath);
+    // Get the highest quality format that includes both video and audio
+    const format = ytdl.chooseFormat(info.formats, {
+      quality: 'highest',
+      filter: 'audioandvideo',
+    });
+
+    if (!format || !format.url) {
+      throw new Error('No suitable video format found');
     }
 
-    // Download video with yt-dlp without cookies
-    await ytDlp.exec([
-      youtubeLink,
-      '-o',
-      videoPath,
-      '-f',
-      'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      '--merge-output-format',
-      'mp4',
-      '--no-check-certificates',
-      '--no-warnings',
-      '--prefer-free-formats',
-      '--user-agent',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    ]);
+    console.log('Starting download to:', videoPath);
+    console.log('Video format:', format.qualityLabel);
+
+    // Download the video using node-fetch
+    const response = await fetch(format.url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to download video: ${response.statusText}`);
+    }
+
+    // Create write stream
+    const fileStream = fs.createWriteStream(videoPath);
+    await new Promise((resolve, reject) => {
+      response.body.pipe(fileStream);
+      response.body.on('error', reject);
+      fileStream.on('finish', resolve);
+    });
 
     // Verify file exists and is readable
     await fs.promises.access(videoPath, fs.constants.R_OK);
@@ -78,6 +98,9 @@ async function downloadVideo(youtubeLink) {
 
     return videoPath;
   } catch (error) {
+    if (fs.existsSync(videoPath)) {
+      fs.unlinkSync(videoPath);
+    }
     throw new Error(`Failed to download video: ${error.message}`);
   }
 }

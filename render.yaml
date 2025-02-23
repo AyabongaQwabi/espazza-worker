@@ -1,8 +1,9 @@
 services:
-  - name: espazza-video-promotion-worker
-    type: worker
-    runtime: node
-    buildCommand: npm install
+  - type: worker
+    name: espazza-video-promotion-worker
+    env: node
+    region: oregon
+    buildCommand: npm ci --production
     startCommand: node worker.js
     envVars:
       - key: SUPABASE_URL
@@ -13,3 +14,9 @@ services:
         sync: false
       - key: FACEBOOK_PAGE_ID
         sync: false
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: tmp
+      mountPath: /tmp
+      sizeGB: 1
