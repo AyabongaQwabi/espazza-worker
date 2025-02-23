@@ -9,6 +9,7 @@
     "play-dl": "^1.9.7",
     "puppeteer": "^22.3.0",
     "googleapis": "^133.0.0",
+    "youtube-dl-exec": "^2.5.7",
     "ytdl-core": "^4.11.5",
     "@supabase/supabase-js": "^2.39.0",
     "facebook-nodejs-business-sdk": "^18.0.0",

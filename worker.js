@@ -1,7 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const { google } = require('googleapis');
-const ytdl = require('ytdl-core');
+const youtubeDl = require('youtube-dl-exec');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -18,13 +18,19 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Function to extract video ID from URL
 function extractVideoId(url) {
-  const videoId = ytdl.getVideoID(url);
-  return videoId;
+  const regex =
+    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
+  const match = url.match(regex);
+  return match ? match[1] : null;
 }
 
 async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
   let lastError;
   const videoId = extractVideoId(youtubeLink);
+
+  if (!videoId) {
+    throw new Error('Invalid YouTube URL');
+  }
 
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -75,6 +81,10 @@ async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
 
 async function downloadVideo(youtubeLink) {
   const videoId = extractVideoId(youtubeLink);
+  if (!videoId) {
+    throw new Error('Invalid YouTube URL');
+  }
+
   const tempDir = path.join(process.cwd(), 'temp');
 
   // Create temp directory if it doesn't exist
@@ -84,22 +94,20 @@ async function downloadVideo(youtubeLink) {
 
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
 
-  return new Promise((resolve, reject) => {
-    const video = ytdl(youtubeLink, {
-      quality: 'highest',
-      filter: 'audioandvideo',
+  try {
+    // Download video with youtube-dl
+    await youtubeDl(youtubeLink, {
+      output: videoPath,
+      format: 'best[ext=mp4]', // Get best quality MP4
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true,
     });
 
-    video.pipe(fs.createWriteStream(videoPath));
-
-    video.on('end', () => {
-      resolve(videoPath);
-    });
-
-    video.on('error', (error) => {
-      reject(error);
-    });
-  });
+    return videoPath;
+  } catch (error) {
+    throw new Error(`Failed to download video: ${error.message}`);
+  }
 }
 
 async function processJob(job) {
