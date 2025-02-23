@@ -9,6 +9,7 @@
     "@supabase/supabase-js": "^2.39.0",
     "dotenv": "^16.4.7",
     "facebook-nodejs-business-sdk": "^18.0.0",
-    "play-dl": "^1.9.7"
+    "play-dl": "^1.9.7",
+    "puppeteer": "^22.3.0"
   }
 }
