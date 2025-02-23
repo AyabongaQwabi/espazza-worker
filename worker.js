@@ -1,6 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
-import { FacebookAdsApi, Page } from 'facebook-nodejs-business-sdk';
-import play from 'play-dl';
+const { createClient } = require('@supabase/supabase-js');
+const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
+const play = require('play-dl');
 
 // Initialize Supabase client
 const supabase = createClient(
