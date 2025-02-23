@@ -6,10 +6,12 @@
     "start": "node worker.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
-    "dotenv": "^16.4.7",
-    "facebook-nodejs-business-sdk": "^18.0.0",
     "play-dl": "^1.9.7",
-    "puppeteer": "^22.3.0"
+    "puppeteer": "^22.3.0",
+    "googleapis": "^133.0.0",
+    "ytdl-core": "^4.11.5",
+    "@supabase/supabase-js": "^2.39.0",
+    "facebook-nodejs-business-sdk": "^18.0.0",
+    "dotenv": "^16.3.1"
   }
 }
