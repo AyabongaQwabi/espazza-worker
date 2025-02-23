@@ -1,12 +1,13 @@
 const { createClient } = require('@supabase/supabase-js');
 const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const { google } = require('googleapis');
-const ytDlp = require('yt-dlp-exec');
+const YTDlpWrap = require('yt-dlp-wrap').default;
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
 const youtube = google.youtube('v3');
+const ytDlp = new YTDlpWrap();
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -96,17 +97,20 @@ async function downloadVideo(youtubeLink) {
 
   try {
     // Download video with yt-dlp
-    await ytDlp(youtubeLink, {
-      output: videoPath,
-      format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', // Get best quality MP4
-      mergeOutputFormat: 'mp4',
-      noCheckCertificates: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      addHeader: [
-        'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      ],
-    });
+    await ytDlp.exec([
+      youtubeLink,
+      '-o',
+      videoPath,
+      '-f',
+      'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      '--merge-output-format',
+      'mp4',
+      '--no-check-certificates',
+      '--no-warnings',
+      '--prefer-free-formats',
+      '--user-agent',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    ]);
 
     return videoPath;
   } catch (error) {
