@@ -25,6 +25,15 @@ function extractVideoId(url) {
   return match ? match[1] : null;
 }
 
+// Ensure temp directory exists with correct permissions
+function ensureTempDir() {
+  const tempDir = path.join('/tmp', 'youtube-downloads');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true, mode: 0o777 });
+  }
+  return tempDir;
+}
+
 async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
   let lastError;
   const videoId = extractVideoId(youtubeLink);
@@ -35,7 +44,6 @@ async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
 
   for (let i = 0; i < maxRetries; i++) {
     try {
-      // Add exponential backoff delay between retries
       if (i > 0) {
         const backoffDelay = Math.min(
           1000 * Math.pow(2, i) + Math.random() * 1000,
@@ -49,7 +57,6 @@ async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
         await delay(backoffDelay);
       }
 
-      // Get video info using YouTube Data API
       const response = await youtube.videos.list({
         key: process.env.YOUTUBE_API_KEY,
         part: ['snippet', 'contentDetails'],
@@ -86,16 +93,17 @@ async function downloadVideo(youtubeLink) {
     throw new Error('Invalid YouTube URL');
   }
 
-  const tempDir = path.join(process.cwd(), 'temp');
-
-  // Create temp directory if it doesn't exist
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir);
-  }
-
+  const tempDir = ensureTempDir();
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
 
   try {
+    console.log('Starting download to:', videoPath);
+
+    // Remove existing file if it exists
+    if (fs.existsSync(videoPath)) {
+      fs.unlinkSync(videoPath);
+    }
+
     // Download video with yt-dlp
     await ytDlp.exec([
       youtubeLink,
@@ -112,6 +120,15 @@ async function downloadVideo(youtubeLink) {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     ]);
 
+    // Verify file exists and is readable
+    await fs.promises.access(videoPath, fs.constants.R_OK);
+    const stats = await fs.promises.stat(videoPath);
+    console.log('Download completed. File size:', stats.size, 'bytes');
+
+    if (stats.size === 0) {
+      throw new Error('Downloaded file is empty');
+    }
+
     return videoPath;
   } catch (error) {
     throw new Error(`Failed to download video: ${error.message}`);
@@ -125,7 +142,6 @@ async function processJob(job) {
   try {
     console.log(`Processing job ${job.id}...`);
 
-    // Update initial status to preparing
     await supabase
       .from('video_promotion_queue')
       .update({ status: currentStatus })
@@ -145,10 +161,14 @@ async function processJob(job) {
       .update({ status: currentStatus })
       .eq('id', job.id);
 
-    // Download video
     console.log('Downloading video...');
     videoPath = await downloadVideo(job.youtube_link);
     console.log('Video downloaded to:', videoPath);
+
+    // Verify file exists and is readable before proceeding
+    await fs.promises.access(videoPath, fs.constants.R_OK);
+    const stats = await fs.promises.stat(videoPath);
+    console.log('Video file size:', stats.size, 'bytes');
 
     const accessToken = process.env.FACEBOOK_ACCESS_TOKEN;
     const pageId = process.env.FACEBOOK_PAGE_ID;
@@ -166,23 +186,27 @@ async function processJob(job) {
       .update({ status: currentStatus })
       .eq('id', job.id);
 
-    console.log('\n\nPreparing post content...');
-    const postDescription = `${job.promotional_text}\n\n${
-      videoInfo.video_details.description || ''
-    }\n\n[ eSpazza YT Promotion by @${job.username} ]`;
+    console.log('\nPreparing post content...');
+    const postDescription = `${job.promotional_text}}\n\n[ eSpazza YT Promotion by @${job.username} ]`;
 
     console.log('Post description:', postDescription);
 
-    console.log('\n\nPosting to Facebook...');
+    console.log('\nPosting to Facebook...');
+    const fileStream = fs.createReadStream(videoPath);
+
+    // Handle stream errors
+    fileStream.on('error', (error) => {
+      console.error('Stream error:', error);
+    });
+
     const response = await page.createVideo({
       description: postDescription,
       title: videoInfo.video_details.title,
-      source: fs.createReadStream(videoPath),
+      source: fileStream,
     });
 
     console.log('Facebook API response:', response);
 
-    // Only update to completed after successful upload
     await supabase
       .from('video_promotion_queue')
       .update({
@@ -202,7 +226,6 @@ async function processJob(job) {
       })
       .eq('id', job.id);
   } finally {
-    // Clean up downloaded video file
     if (videoPath && fs.existsSync(videoPath)) {
       try {
         fs.unlinkSync(videoPath);
