@@ -25,13 +25,18 @@ async function processJob(job) {
       .eq('id', job.id);
 
     // Get video info
+
+    console.log('Getting video info...');
     const videoInfo = await play.video_info(job.youtube_link);
+    console.log('Video info:', videoInfo);
     if (!videoInfo) {
       throw new Error('Could not get video information');
     }
 
     // Get video stream
+    console.log('Getting video stream...');
     const stream = await play.stream_from_info(videoInfo);
+
     if (!stream) {
       throw new Error('Could not get video stream');
     }
@@ -48,11 +53,14 @@ async function processJob(job) {
     const page = new Page(pageId);
 
     // Prepare post content
+    console.log('\n\nPreparing post content...');
     const postDescription = `${job.promotional_text}\n\n${
       videoInfo.video_details.description || ''
     }\n\n[ eSpazza YT Promotion by @${job.username} ]`;
 
+    console.log('Post description:', postDescription);
     // Post to Facebook
+    console.log('\n\nPosting to Facebook...');
     const response = await page.createVideo({
       description: postDescription,
       title: videoInfo.video_details.title,
