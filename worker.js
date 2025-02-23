@@ -1,7 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const { google } = require('googleapis');
-const youtubeDl = require('youtube-dl-exec');
+const ytDlp = require('yt-dlp-exec');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -95,13 +95,17 @@ async function downloadVideo(youtubeLink) {
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
 
   try {
-    // Download video with youtube-dl
-    await youtubeDl(youtubeLink, {
+    // Download video with yt-dlp
+    await ytDlp(youtubeLink, {
       output: videoPath,
-      format: 'best[ext=mp4]', // Get best quality MP4
+      format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', // Get best quality MP4
+      mergeOutputFormat: 'mp4',
       noCheckCertificates: true,
       noWarnings: true,
       preferFreeFormats: true,
+      addHeader: [
+        'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      ],
     });
 
     return videoPath;
