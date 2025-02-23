@@ -9,9 +9,6 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Build TypeScript
-RUN npm run build
-
 # Start the worker
 CMD ["npm", "start"]
 
