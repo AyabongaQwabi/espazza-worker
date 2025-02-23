@@ -1,13 +1,13 @@
 services:
-  - type: worker
-    name: espazza-video-promotion-worker
-    env: node
+  - name: espazza-video-promotion-worker
+    type: worker
+    runtime: node
     buildCommand: npm install
-    startCommand: npm start
+    startCommand: node worker.js
     envVars:
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_SERVICE_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: FACEBOOK_ACCESS_TOKEN
         sync: false
