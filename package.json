@@ -7,8 +7,7 @@
     "build": "echo 'No build step needed'"
   },
   "dependencies": {
-    "ytdl-core": "^4.11.5",
-    "node-fetch": "^2.7.0",
+    "youtube-dl-exec": "^2.5.7",
     "googleapis": "^133.0.0",
     "@supabase/supabase-js": "^2.39.0",
     "facebook-nodejs-business-sdk": "^18.0.0",

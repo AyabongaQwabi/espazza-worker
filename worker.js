@@ -1,8 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const { google } = require('googleapis');
-const ytdl = require('ytdl-core');
-const fetch = require('node-fetch');
+const youtubeDl = require('youtube-dl-exec');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -44,47 +43,32 @@ async function downloadVideo(youtubeLink) {
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
 
   try {
-    console.log('Getting video info...');
-    const info = await ytdl.getInfo(youtubeLink, {
-      requestOptions: {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        },
-      },
-    });
-
-    // Get the highest quality format that includes both video and audio
-    const format = ytdl.chooseFormat(info.formats, {
-      quality: 'highest',
-      filter: 'audioandvideo',
-    });
-
-    if (!format || !format.url) {
-      throw new Error('No suitable video format found');
-    }
-
     console.log('Starting download to:', videoPath);
-    console.log('Video format:', format.qualityLabel);
 
-    // Download the video using node-fetch
-    const response = await fetch(format.url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to download video: ${response.statusText}`);
+    // Remove existing file if it exists
+    if (fs.existsSync(videoPath)) {
+      fs.unlinkSync(videoPath);
     }
 
-    // Create write stream
-    const fileStream = fs.createWriteStream(videoPath);
-    await new Promise((resolve, reject) => {
-      response.body.pipe(fileStream);
-      response.body.on('error', reject);
-      fileStream.on('finish', resolve);
+    // Download video using youtube-dl-exec with advanced options
+    await youtubeDl(youtubeLink, {
+      output: videoPath,
+      format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      mergeOutputFormat: 'mp4',
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true,
+      addHeader: [
+        'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language:en-US,en;q=0.5',
+      ],
+      retryLimit: 10,
+      fragmentRetries: 10,
+      noAbortOnError: true,
+      bufferSize: '16K',
+      maxSleepInterval: 30,
+      sleepInterval: 5,
     });
 
     // Verify file exists and is readable
