@@ -34,6 +34,21 @@ function ensureTempDir() {
   return tempDir;
 }
 
+// Create cookies file with authentication
+async function setupYoutubeCookies() {
+  const cookiesDir = ensureTempDir();
+  const cookiesPath = path.join(cookiesDir, 'youtube.cookies');
+
+  // Create cookies file with the authentication token
+  const cookiesContent = process.env.YOUTUBE_COOKIES || '';
+  if (!cookiesContent) {
+    throw new Error('YouTube cookies not configured');
+  }
+
+  await fs.promises.writeFile(cookiesPath, cookiesContent);
+  return cookiesPath;
+}
+
 async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
   let lastError;
   const videoId = extractVideoId(youtubeLink);
@@ -95,6 +110,7 @@ async function downloadVideo(youtubeLink) {
 
   const tempDir = ensureTempDir();
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
+  const cookiesPath = await setupYoutubeCookies();
 
   try {
     console.log('Starting download to:', videoPath);
@@ -104,7 +120,7 @@ async function downloadVideo(youtubeLink) {
       fs.unlinkSync(videoPath);
     }
 
-    // Download video with yt-dlp
+    // Download video with yt-dlp using cookies
     await ytDlp.exec([
       youtubeLink,
       '-o',
@@ -116,9 +132,16 @@ async function downloadVideo(youtubeLink) {
       '--no-check-certificates',
       '--no-warnings',
       '--prefer-free-formats',
+      '--cookies',
+      cookiesPath,
       '--user-agent',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     ]);
+
+    // Clean up cookies file
+    if (fs.existsSync(cookiesPath)) {
+      fs.unlinkSync(cookiesPath);
+    }
 
     // Verify file exists and is readable
     await fs.promises.access(videoPath, fs.constants.R_OK);
@@ -131,6 +154,10 @@ async function downloadVideo(youtubeLink) {
 
     return videoPath;
   } catch (error) {
+    // Clean up cookies file in case of error
+    if (fs.existsSync(cookiesPath)) {
+      fs.unlinkSync(cookiesPath);
+    }
     throw new Error(`Failed to download video: ${error.message}`);
   }
 }
@@ -187,7 +214,9 @@ async function processJob(job) {
       .eq('id', job.id);
 
     console.log('\nPreparing post content...');
-    const postDescription = `${job.promotional_text}}\n\n[ eSpazza YT Promotion by @${job.username} ]`;
+    const postDescription = `${job.promotional_text}\n\n${
+      videoInfo.video_details.description || ''
+    }\n\n[ eSpazza YT Promotion by @${job.username} ]`;
 
     console.log('Post description:', postDescription);
 
