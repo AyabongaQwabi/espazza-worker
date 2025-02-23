@@ -93,9 +93,13 @@ async function processJob(job) {
 async function worker() {
   console.log('Worker started...');
 
-  while (true) {
+  // Define the interval time (in milliseconds)
+  const intervalTime = 10000; // 10 seconds
+
+  // Function to process jobs
+  async function processPendingJobs() {
     try {
-      // Get the next pending job
+      console.log('Fetching pending jobs...');
       const { data: jobs, error } = await supabase
         .from('video_promotion_queue')
         .select('*')
@@ -105,22 +109,26 @@ async function worker() {
 
       if (error) {
         console.error('Error fetching jobs:', error);
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        continue;
+        return;
       }
 
       if (jobs && jobs.length > 0) {
+        console.log('Found pending jobs:', jobs.length);
         await processJob(jobs[0]);
       } else {
-        // No jobs found, wait before checking again
-        await new Promise((resolve) => setTimeout(resolve, 10000));
+        console.log('No pending jobs found.');
       }
     } catch (error) {
-      console.error('Worker error:', error);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      console.error('Error processing job:', error);
     }
   }
+
+  // Start processing jobs every 10 seconds
+  setInterval(async () => {
+    await processPendingJobs();
+  }, intervalTime);
 }
 
 // Start the worker
 worker().catch(console.error);
+// Start the worker
