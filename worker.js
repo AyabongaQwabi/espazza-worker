@@ -1,18 +1,12 @@
 const { createClient } = require('@supabase/supabase-js');
 const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
-const play = require('play-dl');
-const puppeteer = require('puppeteer');
+const { google } = require('googleapis');
+const ytdl = require('ytdl-core');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
-// Configure play-dl with authentication and multiple user agents
-play.setToken({
-  useragent: [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/122.0.0.0 Safari/537.36',
-  ],
-});
+const youtube = google.youtube('v3');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -22,16 +16,23 @@ const supabase = createClient(
 // Utility function for delay with exponential backoff
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function getVideoInfoWithRetry(youtubeLink, maxRetries = 5) {
+// Function to extract video ID from URL
+function extractVideoId(url) {
+  const videoId = ytdl.getVideoID(url);
+  return videoId;
+}
+
+async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
   let lastError;
+  const videoId = extractVideoId(youtubeLink);
 
   for (let i = 0; i < maxRetries; i++) {
     try {
-      // Exponential backoff delay
+      // Add exponential backoff delay between retries
       if (i > 0) {
         const backoffDelay = Math.min(
           1000 * Math.pow(2, i) + Math.random() * 1000,
-          30000
+          10000
         );
         console.log(
           `Retry attempt ${i + 1}, waiting ${Math.round(
@@ -41,36 +42,28 @@ async function getVideoInfoWithRetry(youtubeLink, maxRetries = 5) {
         await delay(backoffDelay);
       }
 
-      const videoInfo = await play.video_info(youtubeLink);
-      return videoInfo;
+      // Get video info using YouTube Data API
+      const response = await youtube.videos.list({
+        key: process.env.YOUTUBE_API_KEY,
+        part: ['snippet', 'contentDetails'],
+        id: [videoId],
+      });
+
+      if (!response.data.items?.length) {
+        throw new Error('Video not found');
+      }
+
+      const videoInfo = response.data.items[0];
+      return {
+        video_details: {
+          title: videoInfo.snippet.title,
+          description: videoInfo.snippet.description,
+        },
+      };
     } catch (error) {
       console.error(`Attempt ${i + 1} failed:`, error.message);
       lastError = error;
 
-      // If this is a rate limit error, always retry
-      if (
-        error.message.includes('429') ||
-        error.message.includes('Too Many Requests')
-      ) {
-        continue;
-      }
-
-      // If this is a bot detection error, try with Puppeteer as fallback
-      if (
-        (error.message.includes('bot') ||
-          error.message.includes('unusual traffic')) &&
-        i === maxRetries - 1
-      ) {
-        try {
-          console.log('Attempting Puppeteer fallback...');
-          return await getVideoInfoWithPuppeteer(youtubeLink);
-        } catch (puppeteerError) {
-          console.error('Puppeteer fallback failed:', puppeteerError.message);
-          throw puppeteerError;
-        }
-      }
-
-      // For other errors, if we're on the last retry, throw the error
       if (i === maxRetries - 1) {
         throw lastError;
       }
@@ -80,77 +73,43 @@ async function getVideoInfoWithRetry(youtubeLink, maxRetries = 5) {
   throw lastError;
 }
 
-async function getVideoInfoWithPuppeteer(youtubeLink) {
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu',
-      '--window-size=1920x1080',
-    ],
-  });
+async function downloadVideo(youtubeLink) {
+  const videoId = extractVideoId(youtubeLink);
+  const tempDir = path.join(process.cwd(), 'temp');
 
-  try {
-    const page = await browser.newPage();
-
-    // Randomize viewport size slightly
-    await page.setViewport({
-      width: 1920 + Math.floor(Math.random() * 100),
-      height: 1080 + Math.floor(Math.random() * 100),
-    });
-
-    // Set a realistic user agent
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-    );
-
-    // Add random delay to seem more human-like
-    await page.setDefaultNavigationTimeout(30000);
-
-    // Navigate to the YouTube video
-    await page.goto(youtubeLink, {
-      waitUntil: 'networkidle0',
-      timeout: 30000,
-    });
-
-    // Wait for title to be visible
-    await page.waitForSelector('h1.ytd-video-primary-info-renderer', {
-      timeout: 10000,
-    });
-
-    // Extract video information
-    const videoInfo = await page.evaluate(() => {
-      const title = document
-        .querySelector('h1.ytd-video-primary-info-renderer')
-        ?.textContent?.trim();
-      const description = document
-        .querySelector('#description-inline-expander')
-        ?.textContent?.trim();
-
-      return {
-        video_details: {
-          title: title || '',
-          description: description || '',
-        },
-      };
-    });
-
-    return videoInfo;
-  } finally {
-    await browser.close();
+  // Create temp directory if it doesn't exist
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir);
   }
+
+  const videoPath = path.join(tempDir, `${videoId}.mp4`);
+
+  return new Promise((resolve, reject) => {
+    const video = ytdl(youtubeLink, {
+      quality: 'highest',
+      filter: 'audioandvideo',
+    });
+
+    video.pipe(fs.createWriteStream(videoPath));
+
+    video.on('end', () => {
+      resolve(videoPath);
+    });
+
+    video.on('error', (error) => {
+      reject(error);
+    });
+  });
 }
 
 async function processJob(job) {
   let currentStatus = 'preparing';
+  let videoPath = null;
 
   try {
     console.log(`Processing job ${job.id}...`);
 
-    // Update initial status to preparing instead of processing
+    // Update initial status to preparing
     await supabase
       .from('video_promotion_queue')
       .update({ status: currentStatus })
@@ -170,13 +129,10 @@ async function processJob(job) {
       .update({ status: currentStatus })
       .eq('id', job.id);
 
-    // Get video stream with retry logic
-    console.log('Getting video stream...');
-    const stream = await play.stream_from_info(videoInfo);
-
-    if (!stream) {
-      throw new Error('Could not get video stream');
-    }
+    // Download video
+    console.log('Downloading video...');
+    videoPath = await downloadVideo(job.youtube_link);
+    console.log('Video downloaded to:', videoPath);
 
     const accessToken = process.env.FACEBOOK_ACCESS_TOKEN;
     const pageId = process.env.FACEBOOK_PAGE_ID;
@@ -205,7 +161,7 @@ async function processJob(job) {
     const response = await page.createVideo({
       description: postDescription,
       title: videoInfo.video_details.title,
-      source: stream.stream,
+      source: fs.createReadStream(videoPath),
     });
 
     console.log('Facebook API response:', response);
@@ -229,6 +185,16 @@ async function processJob(job) {
         failed_at: new Date().toISOString(),
       })
       .eq('id', job.id);
+  } finally {
+    // Clean up downloaded video file
+    if (videoPath && fs.existsSync(videoPath)) {
+      try {
+        fs.unlinkSync(videoPath);
+        console.log('Cleaned up temporary video file');
+      } catch (error) {
+        console.error('Error cleaning up video file:', error);
+      }
+    }
   }
 }
 
