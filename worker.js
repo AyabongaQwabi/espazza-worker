@@ -1,9 +1,10 @@
 const { createClient } = require('@supabase/supabase-js');
-const { FacebookAdsApi, Page } = require('facebook-nodejs-business-sdk');
 const { google } = require('googleapis');
 const youtubeDl = require('youtube-dl-exec');
 const fs = require('fs');
 const path = require('path');
+const FormData = require('form-data');
+const fetch = require('node-fetch');
 require('dotenv').config();
 
 const youtube = google.youtube('v3');
@@ -53,7 +54,7 @@ async function downloadVideo(youtubeLink) {
     // Download video using youtube-dl-exec with advanced options
     await youtubeDl(youtubeLink, {
       output: videoPath,
-      format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      format: 'best[ext=mp4]/best', // Simplified format for smaller file size
       mergeOutputFormat: 'mp4',
       noCheckCertificates: true,
       noWarnings: true,
@@ -63,8 +64,6 @@ async function downloadVideo(youtubeLink) {
         'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language:en-US,en;q=0.5',
       ],
-      retryLimit: 10,
-      fragmentRetries: 10,
       noAbortOnError: true,
       bufferSize: '16K',
       maxSleepInterval: 30,
@@ -142,6 +141,77 @@ async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
   throw lastError;
 }
 
+async function uploadToFacebook(
+  videoPath,
+  title,
+  description,
+  pageId,
+  accessToken
+) {
+  const maxRetries = 3;
+  let lastError;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      if (i > 0) {
+        const backoffDelay = Math.min(1000 * Math.pow(2, i), 10000);
+        console.log(
+          `Retrying upload, attempt ${i + 1}, waiting ${backoffDelay}ms...`
+        );
+        await delay(backoffDelay);
+      }
+
+      // Verify file exists and is readable before upload
+      const stats = await fs.promises.stat(videoPath);
+      console.log('Uploading video, size:', stats.size, 'bytes');
+
+      if (stats.size === 0) {
+        throw new Error('Video file is empty');
+      }
+
+      if (stats.size > 1024 * 1024 * 1024) {
+        // 1GB
+        throw new Error('Video file is too large (>1GB)');
+      }
+
+      // Create form data
+      const form = new FormData();
+      form.append('source', fs.createReadStream(videoPath));
+      form.append('title', title);
+      form.append('description', description);
+      form.append('access_token', accessToken);
+
+      // Upload to Facebook
+      console.log('Uploading to Facebook Graph API...');
+      const response = await fetch(
+        `https://graph-video.facebook.com/v18.0/${pageId}/videos`,
+        {
+          method: 'POST',
+          body: form,
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`Facebook API error: ${JSON.stringify(error)}`);
+      }
+
+      const result = await response.json();
+      console.log('Facebook upload successful:', result);
+      return result;
+    } catch (error) {
+      console.error(`Upload attempt ${i + 1} failed:`, error);
+      lastError = error;
+
+      if (i === maxRetries - 1) {
+        throw new Error(
+          `Facebook upload failed after ${maxRetries} attempts: ${error.message}`
+        );
+      }
+    }
+  }
+}
+
 async function processJob(job) {
   let currentStatus = 'preparing';
   let videoPath = null;
@@ -172,20 +242,12 @@ async function processJob(job) {
     videoPath = await downloadVideo(job.youtube_link);
     console.log('Video downloaded to:', videoPath);
 
-    // Verify file exists and is readable before proceeding
-    await fs.promises.access(videoPath, fs.constants.R_OK);
-    const stats = await fs.promises.stat(videoPath);
-    console.log('Video file size:', stats.size, 'bytes');
-
     const accessToken = process.env.FACEBOOK_ACCESS_TOKEN;
     const pageId = process.env.FACEBOOK_PAGE_ID;
 
     if (!accessToken || !pageId) {
       throw new Error('Facebook credentials are missing');
     }
-
-    const api = FacebookAdsApi.init(accessToken);
-    const page = new Page(pageId);
 
     currentStatus = 'uploading';
     await supabase
@@ -201,20 +263,13 @@ async function processJob(job) {
     console.log('Post description:', postDescription);
 
     console.log('\nPosting to Facebook...');
-    const fileStream = fs.createReadStream(videoPath);
-
-    // Handle stream errors
-    fileStream.on('error', (error) => {
-      console.error('Stream error:', error);
-    });
-
-    const response = await page.createVideo({
-      description: postDescription,
-      title: videoInfo.video_details.title,
-      source: fileStream,
-    });
-
-    console.log('Facebook API response:', response);
+    const response = await uploadToFacebook(
+      videoPath,
+      videoInfo.video_details.title,
+      postDescription,
+      pageId,
+      accessToken
+    );
 
     await supabase
       .from('video_promotion_queue')
