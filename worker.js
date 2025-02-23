@@ -8,7 +8,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-async function processJob(job: any) {
+async function processJob(job) {
   try {
     console.log(`Processing job ${job.id}...`);
 
@@ -63,7 +63,7 @@ async function processJob(job: any) {
         completed_at: new Date().toISOString(),
       })
       .eq('id', job.id);
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error processing job:', error);
     await supabase
       .from('video_promotion_queue')
