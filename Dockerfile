@@ -7,8 +7,7 @@ RUN apt-get update && \
     chmod a+rx /usr/local/bin/yt-dlp && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /tmp/youtube-downloads && \
-    chmod 777 /tmp/youtube-downloads
+    chmod 777 ./
 
 WORKDIR /app
 
@@ -18,7 +17,7 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
-RUN mkdir -p /data && chown -R node:node /data
+RUN chown -R node:node /app
 # Copy the rest of the application
 COPY . .
 
