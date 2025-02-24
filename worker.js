@@ -17,6 +17,55 @@ const supabase = createClient(
 // Utility function for delay with exponential backoff
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Function to extract links from text and replace them with placeholder
+function extractAndReplaceLinks(text) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const links = text.match(urlRegex) || [];
+  const cleanText = text.replace(urlRegex, '(link in comments)');
+  return { links, cleanText };
+}
+
+// Function to post comment on Facebook video
+async function postFacebookComment(
+  videoId,
+  comment,
+  accessToken,
+  maxRetries = 3
+) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      if (i > 0) {
+        const backoffDelay = Math.min(1000 * Math.pow(2, i), 10000);
+        await delay(backoffDelay);
+      }
+
+      const response = await fetch(
+        `https://graph.facebook.com/v18.0/${videoId}/comments`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: comment,
+            access_token: accessToken,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`Facebook API error: ${JSON.stringify(error)}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error(`Comment attempt ${i + 1} failed:`, error);
+      if (i === maxRetries - 1) throw error;
+    }
+  }
+}
+
 // Function to extract video ID from URL
 function extractVideoId(url) {
   const regex =
@@ -256,9 +305,12 @@ async function processJob(job) {
       .eq('id', job.id);
 
     console.log('\nPreparing post content...');
-    const postDescription = `${job.promotional_text}\n\n${
+    // Extract and replace links in the description
+    const { links, cleanText } = extractAndReplaceLinks(
       videoInfo.video_details.description || ''
-    }\n\n[ eSpazza YT Promotion by @${job.username} ]`;
+    );
+
+    const postDescription = `${job.promotional_text}\n\n${cleanText}\n\n[ eSpazza YT Promotion by @${job.username} ]`;
 
     console.log('Post description:', postDescription);
 
@@ -270,6 +322,22 @@ async function processJob(job) {
       pageId,
       accessToken
     );
+
+    // Post links as comments if they exist
+    if (links.length > 0) {
+      console.log('Found links in description, posting as comments...');
+      const linksComment = links
+        .map((link, index) => `${index + 1}. ${link}`)
+        .join('\n');
+
+      try {
+        await postFacebookComment(response.id, linksComment, accessToken);
+        console.log('Successfully posted links as comment');
+      } catch (error) {
+        console.error('Failed to post links as comment:', error);
+        // Don't fail the whole job if comment posting fails
+      }
+    }
 
     await supabase
       .from('video_promotion_queue')
