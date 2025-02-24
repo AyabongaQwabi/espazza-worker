@@ -1,15 +1,15 @@
+# Use Node.js base image
 FROM node:20-slim
 
-# Install system dependencies including yt-dlp and ffmpeg
+# Install system dependencies including youtube-dl
 RUN apt-get update && \
-    apt-get install -y python3 curl ffmpeg && \
-    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
-    chmod a+rx /usr/local/bin/yt-dlp && \
+    apt-get install -y python3 ffmpeg curl && \
+    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/youtube-dl && \
+    chmod a+rx /usr/local/bin/youtube-dl && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /tmp/youtube-downloads && \
-    chmod 777 /tmp/youtube-downloads
+    rm -rf /var/lib/apt/lists/*
 
+# Create and set working directory
 WORKDIR /app
 
 # Copy package files
@@ -18,9 +18,14 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
-RUN mkdir -p /data && chown -R node:node /data
-# Copy the rest of the application
+# Copy application files
 COPY . .
 
-# Start the worker
-CMD ["node", "worker.js"]
+# Create data directory and set permissions
+RUN mkdir -p /data && chmod 777 /data
+
+# Set environment variables
+ENV NODE_ENV=production
+
+# Start the application
+CMD ["npm", "start"]

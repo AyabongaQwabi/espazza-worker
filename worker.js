@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const FormData = require('form-data');
 const fetch = require('node-fetch');
+const { execSync } = require('child_process');
+const { spawn } = require('child_process');
 require('dotenv').config();
 
 const youtube = google.youtube('v3');
@@ -97,74 +99,69 @@ async function downloadVideo(youtubeLink) {
     throw new Error('Invalid YouTube URL');
   }
 
-  // Use /data directory for temporary files
   const videoPath = path.join('/data', `${videoId}.mp4`);
   console.log('Video will be downloaded to:', videoPath);
 
-  try {
-    console.log('Checking for existing video file...');
-    // Remove existing file if it exists
-    if (fs.existsSync(videoPath)) {
-      console.log('Found existing video file, removing...');
-      fs.unlinkSync(videoPath);
-      console.log('Existing video file removed');
-    }
+  if (!checkYoutubeDl()) {
+    throw new Error('youtube-dl is not available');
+  }
 
-    // Ensure /data directory exists and is writable
-    console.log('Verifying /data directory access...');
-    try {
-      await fs.promises.access('/data', fs.constants.W_OK);
-      console.log('/data directory is accessible and writable');
-    } catch (error) {
-      console.error('Error accessing /data directory:', error);
-      throw new Error('Cannot access /data directory');
-    }
+  return new Promise((resolve, reject) => {
+    const process = spawn('youtube-dl', [
+      '-f',
+      'best[ext=mp4]/best',
+      '-o',
+      videoPath,
+      '--no-check-certificate',
+      '--no-warnings',
+      youtubeLink,
+    ]);
 
-    console.log('Configuring youtube-dl options...');
-    // Download video using youtube-dl-exec with advanced options
-    await youtubeDl(youtubeLink, {
-      output: videoPath,
-      format: 'best[ext=mp4]/best', // Simplified format for smaller file size
-      mergeOutputFormat: 'mp4',
-      noCheckCertificates: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      addHeader: [
-        'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language:en-US,en;q=0.5',
-      ],
-      noAbortOnError: true,
-      bufferSize: '16K',
-      maxSleepInterval: 30,
-      sleepInterval: 5,
+    let stdoutData = '';
+    let stderrData = '';
+
+    process.stdout.on('data', (data) => {
+      stdoutData += data.toString();
+      console.log('youtube-dl stdout:', data.toString());
     });
 
-    console.log('Download completed, verifying file...');
-    // Verify file exists and is readable
-    await fs.promises.access(videoPath, fs.constants.R_OK);
-    const stats = await fs.promises.stat(videoPath);
-    console.log('Video file details:');
-    console.log('- Size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
-    console.log('- Created:', stats.birthtime);
-    console.log('- Last modified:', stats.mtime);
+    process.stderr.on('data', (data) => {
+      stderrData += data.toString();
+      console.error('youtube-dl stderr:', data.toString());
+    });
 
-    if (stats.size === 0) {
-      throw new Error('Downloaded file is empty');
-    }
-
-    console.log('=== Video Download Process Completed Successfully ===\n');
-    return videoPath;
-  } catch (error) {
-    console.error('=== Video Download Process Failed ===');
-    console.error('Error details:', error);
-    if (fs.existsSync(videoPath)) {
-      console.log('Cleaning up failed download file...');
-      fs.unlinkSync(videoPath);
-      console.log('Failed download file removed');
-    }
-    throw new Error(`Failed to download video: ${error.message}`);
-  }
+    process.on('close', (code) => {
+      console.log(`youtube-dl process exited with code ${code}`);
+      if (code === 0) {
+        console.log('Download completed, verifying file...');
+        fs.access(videoPath, fs.constants.R_OK, (err) => {
+          if (err) {
+            console.error('Error accessing downloaded file:', err);
+            reject(
+              new Error(`Failed to access downloaded file: ${err.message}`)
+            );
+          } else {
+            const stats = fs.statSync(videoPath);
+            console.log('Video file details:');
+            console.log('- Size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
+            console.log('- Created:', stats.birthtime);
+            console.log('- Last modified:', stats.mtime);
+            if (stats.size === 0) {
+              reject(new Error('Downloaded file is empty'));
+            } else {
+              resolve(videoPath);
+            }
+          }
+        });
+      } else {
+        reject(
+          new Error(
+            `youtube-dl process failed with code ${code}. Stdout: ${stdoutData}, Stderr: ${stderrData}`
+          )
+        );
+      }
+    });
+  });
 }
 
 async function getVideoInfoWithRetry(youtubeLink, maxRetries = 3) {
@@ -441,11 +438,40 @@ async function processJob(job) {
   }
 }
 
+async function testYoutubeDl() {
+  console.log('=== Testing youtube-dl ===');
+  try {
+    const result = await youtubeDl.exec(['--version']);
+    console.log('youtube-dl version:', result.stdout.trim());
+    console.log('youtube-dl test successful');
+  } catch (error) {
+    console.error('youtube-dl test failed:', error);
+    console.error('Error stack:', error.stack);
+    if (error.stderr) {
+      console.error('youtube-dl stderr:', error.stderr);
+    }
+  }
+  console.log('=== End youtube-dl test ===\n');
+}
+
+function checkYoutubeDl() {
+  try {
+    const version = execSync('youtube-dl --version', { encoding: 'utf8' });
+    console.log('youtube-dl version:', version.trim());
+    return true;
+  } catch (error) {
+    console.error('youtube-dl is not available:', error.message);
+    return false;
+  }
+}
+
 async function worker() {
   console.log('\n===========================================');
   console.log('Worker service starting...');
   console.log('===========================================\n');
-
+  await testYoutubeDl();
+  console.log('Checking youtube-dl availability...');
+  checkYoutubeDl();
   try {
     const files = fs.readdirSync(process.cwd());
     console.log('Directory contents:', files);
