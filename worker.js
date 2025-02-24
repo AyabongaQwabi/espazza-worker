@@ -365,6 +365,7 @@ async function worker() {
   const intervalTime = 10000; // 10 seconds
 
   async function processPendingJobs() {
+    console.log('--- Starting processPendingJobs ---');
     try {
       console.log('Fetching pending jobs...');
       const { data: jobs, error } = await supabase
@@ -373,7 +374,7 @@ async function worker() {
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
         .limit(1);
-
+      console.log('Fetched jobs:', jobs);
       if (error) {
         console.error('Error fetching jobs:', error);
         return;
@@ -388,6 +389,7 @@ async function worker() {
     } catch (error) {
       console.error('Error processing job:', error);
     }
+    console.log('--- Ending processPendingJobs ---');
   }
 
   setInterval(async () => {
