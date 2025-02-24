@@ -80,7 +80,7 @@ async function downloadVideo(youtubeLink) {
     throw new Error('Invalid YouTube URL');
   }
 
-  const videoPath = path.join(process.cwd(), `${videoId}.mp4`);
+  const videoPath = path.join(`./${videoId}.mp4`);
 
   try {
     console.log('Starting download to:', videoPath);
