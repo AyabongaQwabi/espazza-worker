@@ -18,6 +18,7 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
+RUN mkdir -p /data && chown -R node:node /data
 # Copy the rest of the application
 COPY . .
 
