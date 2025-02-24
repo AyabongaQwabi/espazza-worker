@@ -74,23 +74,13 @@ function extractVideoId(url) {
   return match ? match[1] : null;
 }
 
-// Ensure temp directory exists with correct permissions
-function ensureTempDir() {
-  const tempDir = path.join('/tmp', 'youtube-downloads');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true, mode: 0o777 });
-  }
-  return tempDir;
-}
-
 async function downloadVideo(youtubeLink) {
   const videoId = extractVideoId(youtubeLink);
   if (!videoId) {
     throw new Error('Invalid YouTube URL');
   }
 
-  const tempDir = ensureTempDir();
-  const videoPath = path.join(tempDir, `${videoId}.mp4`);
+  const videoPath = path.join(process.cwd(), `${videoId}.mp4`);
 
   try {
     console.log('Starting download to:', videoPath);
@@ -307,10 +297,10 @@ async function processJob(job) {
     console.log('\nPreparing post content...');
     // Extract and replace links in the description
     const { links, cleanText } = extractAndReplaceLinks(
-      videoInfo.video_details.description || ''
+      job.promotional_text || ''
     );
 
-    const postDescription = `${job.promotional_text}\n\n${cleanText}\n\n[ eSpazza YT Promotion by @${job.username} ]`;
+    const postDescription = `${cleanText}\n\n\n Disclaimer: This video was shared from eSpazza Youtube Promotions by @${job.username})\nXhosa Hip Hop claims no coprights to the shared user generated content. \nFor more information, please visit the user profile on eSpazza.`;
 
     console.log('Post description:', postDescription);
 
