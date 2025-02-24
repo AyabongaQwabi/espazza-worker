@@ -446,6 +446,25 @@ async function worker() {
   console.log('Worker service starting...');
   console.log('===========================================\n');
 
+  try {
+    const files = fs.readdirSync(process.cwd());
+    console.log('Directory contents:', files);
+  } catch (error) {
+    console.error('Error listing directory:', error);
+  }
+
+  // Test file creation
+  try {
+    fs.writeFileSync('myfile.txt', 'test');
+    console.log('Successfully created myfile.txt');
+
+    // Verify file exists
+    if (fs.existsSync('myfile.txt')) {
+      console.log('Verified myfile.txt exists');
+    }
+  } catch (error) {
+    console.error('Error creating test file:', error);
+  }
   const intervalTime = 10000; // 10 seconds
 
   async function processPendingJobs() {
